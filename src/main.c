@@ -9,6 +9,8 @@
   @brief        LSH (Libstephen SHell)
 
 *******************************************************************************/
+#define _POSIX_C_SOURCE 200809L
+
 
 #include <sys/wait.h>
 #include <sys/types.h>
@@ -20,9 +22,29 @@
 /*
   Function Declarations for builtin shell commands:
  */
+
+/* ---- History storage ---- */
+#define LSH_HISTORY_MAX 100
+static char *history[LSH_HISTORY_MAX];
+static int   history_count = 0;
+
+static void lsh_history_add(const char *line) {
+  if (history_count < LSH_HISTORY_MAX) {
+    history[history_count++] = strdup(line);
+  }
+}
+
+
+
 int lsh_cd(char **args);
 int lsh_help(char **args);
 int lsh_exit(char **args);
+
+int lsh_pwd(char **args);
+int lsh_echo(char **args);
+int lsh_history_cmd(char **args);
+int lsh_env(char **args);
+
 
 /*
   List of builtin commands, followed by their corresponding functions.
@@ -30,13 +52,21 @@ int lsh_exit(char **args);
 char *builtin_str[] = {
   "cd",
   "help",
-  "exit"
+  "exit",
+  "pwd",
+  "echo",
+  "history",
+  "env"
 };
 
 int (*builtin_func[]) (char **) = {
   &lsh_cd,
   &lsh_help,
-  &lsh_exit
+  &lsh_exit,
+  &lsh_pwd,
+  &lsh_echo,
+  &lsh_history_cmd,
+  &lsh_env
 };
 
 int lsh_num_builtins() {
@@ -93,6 +123,53 @@ int lsh_exit(char **args)
 {
   return 0;
 }
+
+int lsh_pwd(char **args)
+{
+  (void)args;
+  char *cwd = getcwd(NULL, 0);
+  if (cwd == NULL) {
+    perror("lsh: pwd");
+  } else {
+    printf("%s\n", cwd);
+    free(cwd);
+  }
+  return 1;
+}
+
+int lsh_echo(char **args)
+{
+  for (int i = 1; args[i] != NULL; i++) {
+    printf("%s", args[i]);
+    if (args[i + 1] != NULL) printf(" ");
+  }
+  printf("\n");
+  return 1;
+}
+
+int lsh_history_cmd(char **args)
+{
+  (void)args;
+  if (history_count == 0) {
+    printf("lsh: history: no commands recorded yet\n");
+    return 1;
+  }
+  for (int i = 0; i < history_count; i++) {
+    printf("  %3d  %s\n", i + 1, history[i]);
+  }
+  return 1;
+}
+
+extern char **environ;
+int lsh_env(char **args)
+{
+  (void)args;
+  for (char **ep = environ; *ep != NULL; ep++) {
+    printf("%s\n", *ep);
+  }
+  return 1;
+}
+
 
 /**
   @brief Launch a program and wait for it to terminate.
@@ -254,8 +331,14 @@ void lsh_loop(void)
   int status;
 
   do {
-    printf("> ");
+    printf("lsh> ");
+    fflush(stdout);
     line = lsh_read_line();
+
+    if (line[0] != '\0' && strcmp(line, "history") != 0) {
+      lsh_history_add(line);
+    }
+
     args = lsh_split_line(line);
     status = lsh_execute(args);
 
